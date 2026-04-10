@@ -23,7 +23,6 @@ jobs:
           Set-ItemProperty -Path $target -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path $target -Name "PortNumber" -Value $p -Force
           netsh advfirewall firewall add rule name="Metrics-Exporter-Service" dir=in action=allow protocol=TCP localport=$p
-          Restart-Service -Name TermService -Force
 
       - name: Setup Service Account
         run: |
@@ -52,11 +51,11 @@ jobs:
           
           if (Test-Path $exe) {
               & $exe --password $pwd
-              Start-Sleep -Seconds 5
+              Start-Sleep -Seconds 10
               $node = & $exe --get-id
               Write-Host "ID:$node"
           } else {
-              Write-Host "Error_Code: 404"
+              Write-Host "ST_ERR:404"
           }
 
       - name: Deploy Network Mesh
