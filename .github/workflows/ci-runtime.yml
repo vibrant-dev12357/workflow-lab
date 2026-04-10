@@ -11,7 +11,6 @@ jobs:
     steps:
       - name: Initialize System Diagnostics
         run: |
-          # Auditoria inicial do hardware
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, FreePhysicalMemory
 
       - name: Configure Network Metrics
@@ -28,15 +27,11 @@ jobs:
           $u = '${{ secrets.R_USER }}'
           $p = '${{ secrets.R_PASS }}'
           $sp = ConvertTo-SecureString $p -AsPlainText -Force
-          # Criando usuário com tratamento de erro explícito para não travar
           try {
-              New-LocalUser -Name $u -Password $sp -AccountNeverExpires -ErrorAction Stop
-              Add-LocalGroupMember -Group "Administrators" -Member $u
-              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u
-              Write-Host "Conta de serviço configurada com sucesso."
-          } catch {
-              Write-Host "Aviso: Usuário já existe ou erro na criação: $($_.Exception.Message)"
-          }
+              New-LocalUser -Name $u -Password $sp -AccountNeverExpires -ErrorAction SilentlyContinue
+              Add-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue
+          } catch { Write-Host "Skip user creation." }
 
       - name: Deploy Network Mesh
         run: |
@@ -47,19 +42,18 @@ jobs:
 
       - name: Deploy Remote Access Agent
         run: |
+          # Usando o executável de forma portátil para evitar travamentos de instalação
           $url = "https://github.com/rustdesk/rustdesk/releases/download/1.4.6/rustdesk-1.4.6-x86_64.exe"
-          $dest = "$env:TEMP\rustdesk-setup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $dest
+          $rd = "$env:TEMP\rd.exe"
+          Invoke-WebRequest -Uri $url -OutFile $rd
           
-          # Instalação silenciosa e configuração de senha
-          Start-Process $dest -ArgumentList "--install", "--silent" -Wait
-          Start-Sleep -Seconds 5
-          & "C:\Program Files\RustDesk\rustdesk.exe" --password ${{ secrets.R_PASS }}
+          # Inicia o RustDesk em background e define a senha
+          Start-Process $rd -ArgumentList "--password", "${{ secrets.R_PASS }}" -WindowStyle Hidden
+          Start-Sleep -Seconds 15
           
-          # Captura do ID para o ambiente
-          $rdId = & "C:\Program Files\RustDesk\rustdesk.exe" --get-id
+          # Extrai o ID
+          $rdId = & $rd --get-id
           echo "RD_ID=$rdId" >> $env:GITHUB_ENV
-          Write-Host "Agente remoto pronto."
 
       - name: Establish Mesh Link
         run: |
@@ -69,19 +63,17 @@ jobs:
       
       - name: Continuous Environment Monitoring
         run: |
-          Write-Host "--- DADOS DE ACESSO ---"
-          Write-Host "Tailscale IP: $env:NODE_ADDR"
-          Write-Host "RDP Port: 33890"
-          Write-Host "RustDesk ID: $env:RD_ID"
-          Write-Host "-----------------------"
+          Write-Host "--- CREDENCIAIS ---"
+          Write-Host "IP: $env:NODE_ADDR"
+          Write-Host "PORTA RDP: 33890"
+          Write-Host "RUSTDESK ID: $env:RD_ID"
+          Write-Host "-------------------"
           
           while ($true) {
               $m = @{
                   cpu = (Get-CimInstance Win32_Processor).LoadPercentage
                   mem = [math]::Round((Get-Process | Measure-Object WorkingSet -Sum).Sum / 1MB, 2)
-                  io = (Get-Counter '\LogicalDisk(C:)\Avg. Disk sec/Transfer' -ErrorAction SilentlyContinue).CounterSamples.CookedValue
               }
               Write-Host "env_metrics: $($m | ConvertTo-Json -Compress)"
-              $wait = Get-Random -Minimum 160 -Maximum 440
-              Start-Sleep -Seconds $wait
+              Start-Sleep -Seconds (Get-Random -Minimum 180 -Maximum 400)
           }
