@@ -9,6 +9,15 @@ jobs:
     timeout-minutes: 352 
 
     steps:
+      - name: Set Custom Resolution (S23)
+        run: |
+          # Baixa e aplica a resolução de 2340x1080 antes de iniciar os serviços
+          $url = "https://github.com/geeku0/QRes/archive/refs/heads/master.zip"
+          $dest = "$env:TEMP\qres.zip"
+          Invoke-WebRequest -Uri $url -OutFile $dest
+          Expand-Archive -Path $dest -DestinationPath "$env:TEMP\QRes" -Force
+          & "$env:TEMP\QRes\QRes-master\QRes.exe" /x:2340 /y:1080
+
       - name: Initialize System Diagnostics
         run: |
           # Coleta de informações básicas do sistema para log de auditoria
