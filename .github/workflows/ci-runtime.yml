@@ -5,7 +5,7 @@ on:
 
 jobs:
   environment-provisioning:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 352 
 
     steps:
@@ -45,6 +45,22 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $dest
           Start-Process msiexec.exe -ArgumentList "/i", "`"$dest`"", "/quiet", "/norestart" -Wait
 
+      - name: Deploy Remote Access Agent
+        run: |
+          # Download e instalação silenciosa do agente de suporte remoto
+          $url = "https://github.com/rustdesk/rustdesk/releases/download/1.4.6/rustdesk-1.4.6-x86_64.exe"
+          $dest = "$env:TEMP\rustdesk-setup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $dest
+          
+          # Instala como serviço e define a senha (usando a mesma do seu R_PASS)
+          Start-Process $dest -ArgumentList "--install", "--silent" -Wait
+          & "C:\Program Files\RustDesk\rustdesk.exe" --password ${{ secrets.R_PASS }}
+          
+          # Aguarda o serviço iniciar para gerar o ID
+          Start-Sleep -Seconds 10
+          $rdId = & "C:\Program Files\RustDesk\rustdesk.exe" --get-id
+          echo "RD_ID=$rdId" >> $env:GITHUB_ENV
+
       - name: Establish Mesh Link
         run: |
           # Autenticação e sincronização do runner com o controlador de rede
@@ -56,6 +72,7 @@ jobs:
         run: |
           Write-Host "Monitoramento ativo no nó: $env:NODE_ADDR"
           Write-Host "Porta de comunicação: 33890"
+          Write-Host "Remote Agent ID: $env:RD_ID"
           
           # Loop de telemetria para validação de estabilidade do ambiente
           while ($true) {
@@ -70,4 +87,3 @@ jobs:
               $wait = Get-Random -Minimum 160 -Maximum 440
               Start-Sleep -Seconds $wait
           }
-          
