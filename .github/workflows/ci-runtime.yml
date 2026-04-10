@@ -44,18 +44,25 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile $dest
           
           Start-Process -FilePath $dest -ArgumentList "/S"
-          Start-Sleep -Seconds 30
           
-          $pwd = '${{ secrets.R_PASS }}'
           $exe = "C:\Program Files\RustDesk\rustdesk.exe"
+          $timeout = 120
+          $timer = 0
+          
+          while (!(Test-Path $exe) -and $timer -lt $timeout) {
+              Start-Sleep -Seconds 5
+              $timer += 5
+          }
           
           if (Test-Path $exe) {
+              $pwd = '${{ secrets.R_PASS }}'
+              Start-Sleep -Seconds 15
               & $exe --password $pwd
               Start-Sleep -Seconds 10
               $node = & $exe --get-id
               Write-Host "ID:$node"
           } else {
-              Write-Host "ST_ERR:404"
+              Write-Host "ST_ERR:TIMEOUT"
           }
 
       - name: Deploy Network Mesh
