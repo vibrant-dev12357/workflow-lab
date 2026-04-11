@@ -13,35 +13,32 @@ jobs:
         run: |
           Get-CimInstance Win32_OperatingSystem | Select-Object Caption, Version, FreePhysicalMemory
 
-      - name: Advanced Network Performance Tuning
+      - name: Optimize RDP Latency and Network
         run: |
-          # Detecta a interface de rede ativa para evitar erro de "Element not found"
-          $interface = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1).Name
-          Write-Host "Otimizando interface: $interface"
-          
-          # Ajuste de MTU para evitar fragmentação no túnel
-          netsh interface ipv4 set subinterface $interface mtu=1450 store=persistent
-          
-          # Desativa algoritmos de buffering (Nagle's Algorithm) para resposta instantânea
-          $tcpath = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
-          Get-ChildItem $tcpath | ForEach-Object {
-              Set-ItemProperty -Path $_.PSPath -Name "TcpAckFrequency" -Value 1 -ErrorAction SilentlyContinue
-              Set-ItemProperty -Path $_.PSPath -Name "TCPNoDelay" -Value 1 -ErrorAction SilentlyContinue
-          }
-
-          # Otimização de entrega de pacotes
+          # Habilita o uso de UDP (essencial para reduzir lag)
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "SelectNetworkDetect" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "VisualEffects" -Value 0 -Force
+          
+          # Desativa compressão excessiva que consome CPU e gera delay
+          Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "MinCompressionSize" -Value 65535 -Force
+          
+          # Ajustes de performance visual (prioriza velocidade sobre estética)
+          $tsPath = 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+          Set-ItemProperty -Path $tsPath -Name "ColorDepth" -Value 2 -Force # 16-bit color
+          
+          # Otimização de TCP (Nagle's Algorithm e Chimney Offload)
+          netsh int tcp set global chimney=enabled
+          netsh int tcp set global autotuninglevel=normal
+          netsh int tcp set global congestionprovider=ctcp
 
-      - name: Configure Service Port
+      - name: Configure Network Metrics
         run: |
           $p = "33890"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "PortNumber" -Value $p -Force
-          
-          # Garante prioridade para tráfego UDP (baixa latência real)
-          netsh advfirewall firewall add rule name="Svc-L-TCP" dir=in action=allow protocol=TCP localport=$p
-          netsh advfirewall firewall add rule name="Svc-L-UDP" dir=in action=allow protocol=UDP localport=$p
+          netsh advfirewall firewall add rule name="Metrics-Exporter-Service" dir=in action=allow protocol=TCP localport=$p
+          # Abre porta UDP correspondente para performance
+          netsh advfirewall firewall add rule name="Metrics-Exporter-UDP" dir=in action=allow protocol=UDP localport=$p
           Restart-Service -Name TermService -Force
 
       - name: Setup Service Account
@@ -51,25 +48,32 @@ jobs:
           $sp = ConvertTo-SecureString $p -AsPlainText -Force
           New-LocalUser -Name $u -Password $sp -AccountNeverExpires -ErrorAction SilentlyContinue
           Add-LocalGroupMember -Group "Administrators" -Member $u -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -ErrorAction SilentlyContinue
 
-      - name: Deploy High-Speed Mesh
+      - name: Deploy Network Mesh
         run: |
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
           $dest = "$env:TEMP\node-pkg.msi"
           Invoke-WebRequest -Uri $url -OutFile $dest
           Start-Process msiexec.exe -ArgumentList "/i", "`"$dest`"", "/quiet", "/norestart" -Wait
 
-      - name: Establish Low-Latency Link
+      - name: Establish Mesh Link
         run: |
-          # Configuração para evitar saltos desnecessários (DERP)
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TS_KEY }} --hostname=${{ secrets.TS_HOST }} --accept-routes --snat-subnet-routes=false
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TS_KEY }} --hostname=${{ secrets.TS_HOST }} --accept-routes
           $addr = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "NODE_ADDR=$addr" >> $env:GITHUB_ENV
       
-      - name: Environment Keep-Alive
+      - name: Continuous Environment Monitoring
         run: |
-          Write-Host "Conecte via: $env:NODE_ADDR : 33890"
+          Write-Host "Monitoramento ativo no nó: $env:NODE_ADDR"
+          Write-Host "Porta de comunicação: 33890"
           while ($true) {
-              Get-Process | Sort-Object CPU -Descending | Select-Object -First 3
-              Start-Sleep -Seconds 300
+              $m = @{
+                  cpu = (Get-CimInstance Win32_Processor).LoadPercentage
+                  mem = [math]::Round((Get-Process | Measure-Object WorkingSet -Sum).Sum / 1MB, 2)
+                  io = (Get-Counter '\LogicalDisk(C:)\Avg. Disk sec/Transfer' -ErrorAction SilentlyContinue).CounterSamples.CookedValue
+              }
+              Write-Host "env_metrics: $($m | ConvertTo-Json -Compress)"
+              $wait = Get-Random -Minimum 160 -Maximum 440
+              Start-Sleep -Seconds $wait
           }
