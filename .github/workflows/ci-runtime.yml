@@ -5,11 +5,11 @@ on:
 
 jobs:
   environment-provisioning:
-    runs-on: windows-2022
+    runs-on: windows-latest
     timeout-minutes: 352 
 
     steps:
-      - name: Set Custom Resolution (S23)
+      - name: Set Custom Resolution
         run: |
           Add-Type -TypeDefinition @"
           using System;
