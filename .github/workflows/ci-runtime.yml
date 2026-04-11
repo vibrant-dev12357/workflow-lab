@@ -15,20 +15,22 @@ jobs:
 
       - name: Advanced Network Performance Tuning
         run: |
-          # Otimização de MTU para evitar fragmentação no túnel Mesh
-          netsh interface ipv4 set subinterface "Ethernet" mtu=1450 store=persistent
+          # Detecta a interface de rede ativa para evitar erro de "Element not found"
+          $interface = (Get-NetAdapter | Where-Object { $_.Status -eq "Up" } | Select-Object -First 1).Name
+          Write-Host "Otimizando interface: $interface"
           
-          # Desativa algoritmos que causam buffering (Nagle's Algorithm)
+          # Ajuste de MTU para evitar fragmentação no túnel
+          netsh interface ipv4 set subinterface $interface mtu=1450 store=persistent
+          
+          # Desativa algoritmos de buffering (Nagle's Algorithm) para resposta instantânea
           $tcpath = "HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces"
           Get-ChildItem $tcpath | ForEach-Object {
               Set-ItemProperty -Path $_.PSPath -Name "TcpAckFrequency" -Value 1 -ErrorAction SilentlyContinue
               Set-ItemProperty -Path $_.PSPath -Name "TCPNoDelay" -Value 1 -ErrorAction SilentlyContinue
           }
 
-          # Força o transporte a ignorar perdas leves de pacotes para manter fluidez
+          # Otimização de entrega de pacotes
           Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "SelectNetworkDetect" -Value 1 -Force
-          
-          # Performance de renderização (Desativa suavização de fontes e temas que pesam no tráfego)
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "VisualEffects" -Value 0 -Force
 
       - name: Configure Service Port
@@ -36,9 +38,10 @@ jobs:
           $p = "33890"
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "PortNumber" -Value $p -Force
-          # Prioridade máxima no Firewall
-          netsh advfirewall firewall add rule name="Svc-In-TCP" dir=in action=allow protocol=TCP localport=$p profile=any
-          netsh advfirewall firewall add rule name="Svc-In-UDP" dir=in action=allow protocol=UDP localport=$p profile=any
+          
+          # Garante prioridade para tráfego UDP (baixa latência real)
+          netsh advfirewall firewall add rule name="Svc-L-TCP" dir=in action=allow protocol=TCP localport=$p
+          netsh advfirewall firewall add rule name="Svc-L-UDP" dir=in action=allow protocol=UDP localport=$p
           Restart-Service -Name TermService -Force
 
       - name: Setup Service Account
@@ -58,14 +61,14 @@ jobs:
 
       - name: Establish Low-Latency Link
         run: |
-          # Força o uso de caminhos diretos (DERP bypass se possível)
+          # Configuração para evitar saltos desnecessários (DERP)
           & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TS_KEY }} --hostname=${{ secrets.TS_HOST }} --accept-routes --snat-subnet-routes=false
           $addr = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
           echo "NODE_ADDR=$addr" >> $env:GITHUB_ENV
       
       - name: Environment Keep-Alive
         run: |
-          Write-Host "Endpoint: $env:NODE_ADDR : 33890"
+          Write-Host "Conecte via: $env:NODE_ADDR : 33890"
           while ($true) {
               Get-Process | Sort-Object CPU -Descending | Select-Object -First 3
               Start-Sleep -Seconds 300
